@@ -78,8 +78,9 @@ function M.resolve_variables_in_table(tbl, cfg)
   return result
 end
 
---- Strip JSONC comments (// and /* */) properly
---- Handles comments inside arrays, after values, etc.
+--- Strip JSONC comments (// and /* */) from text.
+--- Only removes comments — does not try to fix commas or structure.
+--- Handles strings correctly (won't strip // inside "strings").
 ---@param text string
 ---@return string
 local function strip_jsonc_comments(text)
@@ -87,7 +88,6 @@ local function strip_jsonc_comments(text)
   local i = 1
   local len = #text
   local in_string = false
-  local string_char = nil
 
   while i <= len do
     local c = text:sub(i, i)
@@ -101,13 +101,11 @@ local function strip_jsonc_comments(text)
         if i <= len then
           table.insert(result, text:sub(i, i))
         end
-      elseif c == string_char then
+      elseif c == '"' then
         in_string = false
-        string_char = nil
       end
     elseif c == '"' then
       in_string = true
-      string_char = c
       table.insert(result, c)
     elseif c == "/" and next_c == "/" then
       -- Single-line comment: skip to end of line
@@ -115,7 +113,7 @@ local function strip_jsonc_comments(text)
       while i <= len and text:sub(i, i) ~= "\n" do
         i = i + 1
       end
-      -- Don't skip the newline itself, let the loop handle it
+      -- Don't skip the newline itself
       goto continue
     elseif c == "/" and next_c == "*" then
       -- Block comment: skip to */
@@ -153,6 +151,108 @@ local function strip_trailing_commas(text)
   return text
 end
 
+--- Fix missing commas after comment stripping.
+--- When JSONC comments between array/object values are removed, adjacent
+--- values may end up with no comma between them. This function scans the
+--- JSON text character-by-character (respecting strings) and inserts commas
+--- wherever two values are adjacent with only whitespace separating them.
+--- It distinguishes object keys (followed by ':') from values.
+---@param text string
+---@return string
+local function fix_missing_commas(text)
+  local result = {}
+  local i = 1
+  local len = #text
+  local in_string = false
+  -- Track last meaningful token: "value", "comma", "colon", "open", nil
+  local last_token = nil
+
+  while i <= len do
+    local c = text:sub(i, i)
+
+    if in_string then
+      table.insert(result, c)
+      if c == "\\" then
+        i = i + 1
+        if i <= len then
+          table.insert(result, text:sub(i, i))
+        end
+      elseif c == '"' then
+        in_string = false
+        -- Determine if this string is a key or a value by peeking for ':'
+        local peek = i + 1
+        while peek <= len and text:sub(peek, peek):match("%s") do
+          peek = peek + 1
+        end
+        if peek <= len and text:sub(peek, peek) == ":" then
+          last_token = nil  -- it's a key, not a value
+        else
+          last_token = "value"
+        end
+      end
+      i = i + 1
+    elseif c == '"' then
+      -- Starting a new string
+      if last_token == "value" then
+        table.insert(result, ",")
+      end
+      in_string = true
+      table.insert(result, c)
+      i = i + 1
+    elseif c:match("%s") then
+      table.insert(result, c)
+      i = i + 1
+    elseif c == "," then
+      table.insert(result, c)
+      last_token = "comma"
+      i = i + 1
+    elseif c == ":" then
+      table.insert(result, c)
+      last_token = "colon"
+      i = i + 1
+    elseif c == "{" or c == "[" then
+      if last_token == "value" then
+        table.insert(result, ",")
+      end
+      table.insert(result, c)
+      last_token = "open"
+      i = i + 1
+    elseif c == "}" or c == "]" then
+      table.insert(result, c)
+      last_token = "value"
+      i = i + 1
+    elseif c == "-" or c:match("%d") then
+      -- Number
+      if last_token == "value" then
+        table.insert(result, ",")
+      end
+      table.insert(result, c)
+      i = i + 1
+      while i <= len and text:sub(i, i):match("[%d%.eE%+%-]") do
+        table.insert(result, text:sub(i, i))
+        i = i + 1
+      end
+      last_token = "value"
+    else
+      -- Check for true/false/null keywords
+      local word = text:match("^(true)", i) or text:match("^(false)", i) or text:match("^(null)", i)
+      if word then
+        if last_token == "value" then
+          table.insert(result, ",")
+        end
+        table.insert(result, word)
+        i = i + #word
+        last_token = "value"
+      else
+        table.insert(result, c)
+        i = i + 1
+      end
+    end
+  end
+
+  return table.concat(result)
+end
+
 --- Read and parse launch.json from the workspace
 ---@param path string|nil Optional path to launch.json
 ---@return table|nil configurations Array of launch configurations
@@ -167,8 +267,9 @@ function M.read_launch_json(path)
 
   local content = table.concat(vim.fn.readfile(path), "\n")
 
-  -- Strip JSONC comments and trailing commas
+  -- Strip JSONC comments, fix missing commas, then strip trailing commas
   content = strip_jsonc_comments(content)
+  content = fix_missing_commas(content)
   content = strip_trailing_commas(content)
 
   local ok, data = pcall(vim.json.decode, content)
