@@ -121,12 +121,7 @@ end
 --- Get the name of the last debug configuration (or nil)
 ---@return string|nil
 function M.last_debug_name()
-  local ok, dap = pcall(require, "dap")
-  if ok and dap.session() then
-    local cfg = dap.session().config
-    return cfg and cfg.name or nil
-  end
-  return nil
+  return require("nvim-launch.picker")._last_debug_name
 end
 
 --- Update the quickui Run menu labels with current last-run names.
