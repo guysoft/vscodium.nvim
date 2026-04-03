@@ -126,6 +126,12 @@ function M.run(cfg)
   -- Store for "run last"
   M._last_config = cfg
 
+  -- Update quickui menu label to show last-run name
+  local ok, init = pcall(require, "nvim-launch")
+  if ok and init.update_quickui_menu then
+    init.update_quickui_menu()
+  end
+
   -- Build command
   local command = M.build_command(resolved)
 

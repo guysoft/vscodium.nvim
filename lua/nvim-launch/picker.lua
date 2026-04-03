@@ -6,6 +6,9 @@ local M = {}
 local launch_json = require("nvim-launch.launch_json")
 local runner = require("nvim-launch.runner")
 
+-- Store last debug config name for menu display
+M._last_debug_name = nil
+
 --- Pick a launch configuration and run it (without debugging)
 function M.pick_and_run()
   local configs, err = launch_json.get_raw_configurations()
@@ -39,6 +42,18 @@ function M.pick_and_debug()
   if not dap_ok then
     vim.notify("nvim-dap is not installed", vim.log.levels.ERROR)
     return
+  end
+
+  -- Register a one-shot listener to capture the config name when session starts
+  dap.listeners.after.event_initialized["nvim-launch"] = function(session)
+    if session and session.config and session.config.name then
+      M._last_debug_name = session.config.name
+      -- Update quickui menu to show the debug name
+      local ok, init = pcall(require, "nvim-launch")
+      if ok and init.update_quickui_menu then
+        init.update_quickui_menu()
+      end
+    end
   end
 
   -- Let nvim-dap handle everything — it already loads launch.json automatically
