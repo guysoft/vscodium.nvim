@@ -18,6 +18,24 @@ function M.setup(opts)
 
   local conf = config.get()
 
+  -- Ensure RPC socket is available for external tools (e.g., debug-reach skill).
+  -- If NVIM_IDE_SOCK is set (by tmux-ide) but the socket isn't listening,
+  -- start it. This handles nvim restarts within the same tmux session.
+  local ide_sock = vim.fn.getenv("NVIM_IDE_SOCK")
+  if ide_sock and ide_sock ~= vim.NIL and ide_sock ~= "" then
+    local servers = vim.fn.serverlist()
+    local listening = false
+    for _, s in ipairs(servers) do
+      if s == ide_sock then
+        listening = true
+        break
+      end
+    end
+    if not listening then
+      pcall(vim.fn.serverstart, ide_sock)
+    end
+  end
+
   -- Register keymaps
   if conf.keymaps then
     M._setup_keymaps(conf.keys)
@@ -25,10 +43,19 @@ function M.setup(opts)
 
   -- Register quickui menu after quickui loads
   if conf.quickui_menu then
-    -- Defer to ensure quickui is loaded first
+    -- Use VimEnter autocmd to ensure quickui is fully loaded
+    vim.api.nvim_create_autocmd("VimEnter", {
+      once = true,
+      callback = function()
+        vim.defer_fn(function()
+          require("nvim-launch.quickui").setup_menu()
+        end, 100)
+      end,
+    })
+    -- Also try immediately in case VimEnter already fired (lazy loading)
     vim.defer_fn(function()
       require("nvim-launch.quickui").setup_menu()
-    end, 200)
+    end, 500)
   end
 
   -- Register user commands

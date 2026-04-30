@@ -202,6 +202,32 @@ This plugin is designed to work with [tmux-ide](https://github.com/guysoft/tmux-
 
 When you "Run Without Debugging", the command is sent to pane 1 (the terminal), so you can see output without leaving your editor.
 
+## AI-Driven Debugging (debug-reach)
+
+This plugin includes an **AI debug-reach skill** that allows an AI coding agent (like [OpenCode](https://opencode.ai)) to programmatically control the debugger via nvim's RPC interface. The agent can:
+
+- Set breakpoints on any file/line
+- Launch debug sessions
+- Poll debugger state (stopped, reason, stack frames)
+- Step through code, continue, terminate
+
+This feature requires all three repos working together:
+
+| Component | Repo | Role |
+|-----------|------|------|
+| **vscodium.nvim** | [guysoft/vscodium.nvim](https://github.com/guysoft/vscodium.nvim) | Provides `debug-rpc.lua` module and the skill instructions |
+| **tmux-ide** | [guysoft/tmux-ide](https://github.com/guysoft/tmux-ide) | Exposes `NVIM_IDE_SOCK` env var so the agent can discover nvim's RPC socket |
+| **NvGuy** | [guysoft/NvGuy](https://github.com/guysoft/NvGuy) | Wires up nvim-dap, dap-ui, mason-nvim-dap, and the Run menu |
+
+### How it works
+
+1. tmux-ide launches nvim with `--listen $NVIM_IDE_SOCK`
+2. The agent discovers the socket via `tmux show-environment NVIM_IDE_SOCK`
+3. The agent calls `debug-rpc.lua` functions via `nvim --server $SOCK --remote-expr`
+4. Breakpoints are hit, dap-ui auto-opens, and the agent can inspect state
+
+See `.opencode/skills/debug-reach/SKILL.md` for the full skill specification.
+
 ## Related
 
 - [tmux-ide](https://github.com/guysoft/tmux-ide) -- 3-pane tmux IDE layout
