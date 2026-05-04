@@ -36,6 +36,7 @@ A Neovim plugin that brings VSCode-like Run/Debug functionality to your editor. 
 - **Platform-specific configs** -- respects `linux`, `osx`, `windows` overrides
 - **Vim-quickui integration** -- adds a "Run" menu to the menu bar
 - **Auto-creates launch.json** -- with sensible defaults for Python and Go
+- **Navigation History Buttons** -- VS Code-style back/forward navigation with mouse button support and optional bufferline.nvim GUI buttons (◀ ▶)
 
 ## Requirements
 
@@ -99,6 +100,8 @@ Press `F10` or `<leader>m` to open the menu bar, then select "Run".
 | `:LaunchRunLast` | Re-run last config without debugging |
 | `:LaunchDebugLast` | Re-run last debug session |
 | `:LaunchOpen` | Open or create `.vscode/launch.json` |
+| `:NavigateBack` | Navigate back in cursor history |
+| `:NavigateForward` | Navigate forward in cursor history |
 
 ### How "Run Without Debugging" Works
 
@@ -120,6 +123,38 @@ When you select "Start Debugging":
 2. Shows a picker with all configurations (from both launch.json and dap.configurations)
 3. Starts a full DAP debug session with breakpoints, stepping, variable inspection, etc.
 4. nvim-dap-ui auto-opens panels for scopes, watches, stacks, and console
+
+### Navigation History Buttons
+
+VS Code-style back/forward navigation through your cursor position history.
+
+**Mouse buttons:** Back/forward mouse buttons work out of the box (enabled by default).
+
+**Bufferline GUI buttons:** Optional ◀ ▶ buttons appear left of your buffer tabs (enabled by default). They gray out when you're at the start/end of the history.
+
+To use the bufferline buttons, add to your `bufferline.nvim` config:
+
+```lua
+require("bufferline").setup({
+  options = {
+    custom_areas = {
+      left = function()
+        return require("nvim-launch.navigation-history-buttons").get_bufferline_components()
+      end,
+    },
+  },
+})
+```
+
+To disable the GUI buttons:
+
+```lua
+require("nvim-launch").setup({
+  navigation_history_buttons = {
+    bufferline_buttons = false,
+  },
+})
+```
 
 ## Configuration
 

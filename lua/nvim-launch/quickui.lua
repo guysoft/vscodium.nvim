@@ -11,6 +11,13 @@ function M.setup_menu()
     return
   end
 
+  -- Add Navigate Back/Forward to the Jumps menu
+  vim.fn["quickui#menu#install"]("&Jumps", {
+    { "--" },
+    { "Navigate &Back         X1Mouse",  "lua require('nvim-launch.navigation-history-buttons').go_back()",    "Go back in cursor position history" },
+    { "Navigate &Forward      X2Mouse",  "lua require('nvim-launch.navigation-history-buttons').go_forward()", "Go forward in cursor position history" },
+  }, 170)
+
   vim.fn["quickui#menu#install"]("&Run", {
     { "&Run                   Ctrl+F5",  "lua require('nvim-launch').run()",          "Pick a config and run without debugger (in tmux pane)" },
     { "Start &Debugging          F6",    "lua require('nvim-launch').debug()",        "Pick a config and start debugging" },

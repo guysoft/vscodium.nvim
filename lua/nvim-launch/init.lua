@@ -58,6 +58,11 @@ function M.setup(opts)
     end, 500)
   end
 
+  -- Setup navigation history buttons (back/forward)
+  if conf.navigation_history_buttons then
+    require("nvim-launch.navigation-history-buttons").setup(conf.navigation_history_buttons)
+  end
+
   -- Register user commands
   M._setup_commands()
 end

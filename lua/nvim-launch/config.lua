@@ -30,6 +30,17 @@ local defaults = {
   -- Register vim-quickui menu
   quickui_menu = true,
 
+  -- Navigation history buttons (VS Code-style back/forward)
+  navigation_history_buttons = {
+    enabled = true,
+    mouse_buttons = true,         -- map mouse back/forward buttons (X1Mouse/X2Mouse)
+    bufferline_buttons = false,   -- show ◀ ▶ buttons in bufferline tab bar (requires bufferline.nvim)
+    keys = {
+      back = nil,                 -- nil = don't add extra keymap (native <C-o> still works)
+      forward = nil,
+    },
+  },
+
   -- Register keybindings
   keymaps = true,
 
