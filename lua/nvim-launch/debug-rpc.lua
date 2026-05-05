@@ -47,38 +47,49 @@ function M.register_listeners()
     end
   end
 
-  -- Execution stopped (breakpoint hit, step completed, etc.)
+  -- Execution stopped (breakpoint hit, step completed, etc.).
+  -- We delay setting M._state.stopped = true until after stackTrace lands,
+  -- so callers polling get_state() never observe stopped=true with empty
+  -- file/line/frames. (Pre-fix race: event_stopped flipped stopped first
+  -- and fired an async stackTrace request; pollers won the race.)
   dap.listeners.after.event_stopped["debug-rpc"] = function(session, body)
-    M._state.stopped = true
     M._state.reason = body and body.reason or "unknown"
     M._state.thread_id = body and body.threadId or 0
+    -- Reset frame data; will be repopulated below.
+    M._state.frames = {}
+    M._state.file = ""
+    M._state.line = 0
 
-    -- Get the current stack frame to determine file and line
-    if session then
-      local thread_id = M._state.thread_id
-      if thread_id == 0 and body and body.allThreadsStopped then
-        -- Use first thread if all stopped
-        thread_id = 1
-      end
-      -- Request stack trace
-      session:request("stackTrace", { threadId = thread_id, startFrame = 0, levels = 5 }, function(err, response)
-        if not err and response and response.stackFrames then
-          M._state.frames = {}
-          for i, frame in ipairs(response.stackFrames) do
-            M._state.frames[i] = {
-              name = frame.name,
-              file = frame.source and frame.source.path or "",
-              line = frame.line,
-            }
-          end
-          -- Top frame is current position
-          if #M._state.frames > 0 then
-            M._state.file = M._state.frames[1].file
-            M._state.line = M._state.frames[1].line
-          end
-        end
-      end)
+    if not session then
+      -- No session means we can't request stackTrace; surface the stop
+      -- anyway so callers don't hang forever.
+      M._state.stopped = true
+      return
     end
+
+    local thread_id = M._state.thread_id
+    if thread_id == 0 and body and body.allThreadsStopped then
+      thread_id = 1
+    end
+    -- Request stack trace, then mark stopped only when we have frames.
+    session:request("stackTrace", { threadId = thread_id, startFrame = 0, levels = 5 }, function(err, response)
+      if not err and response and response.stackFrames then
+        for i, frame in ipairs(response.stackFrames) do
+          M._state.frames[i] = {
+            name = frame.name,
+            file = frame.source and frame.source.path or "",
+            line = frame.line,
+          }
+        end
+        if #M._state.frames > 0 then
+          M._state.file = M._state.frames[1].file
+          M._state.line = M._state.frames[1].line
+        end
+      end
+      -- Always flip stopped last, even on stackTrace error, so pollers
+      -- don't hang on adapter glitches.
+      M._state.stopped = true
+    end)
   end
 
   -- Session terminated
@@ -128,6 +139,11 @@ function M.set_breakpoint(file, line, condition)
   if not ok then
     return vim.fn.json_encode({ success = false, error = "nvim-dap not available" })
   end
+
+  -- Normalize msgpack/RPC nils: callers over the Neovim RPC bridge get
+  -- vim.NIL for absent args, but dap.set_breakpoint asserts type(cond)
+  -- == "string" when non-nil, so vim.NIL crashes it. Translate to lua nil.
+  if condition == vim.NIL then condition = nil end
 
   -- Open the file in a buffer without discarding current buffer changes
   local bufnr = vim.fn.bufadd(file)
@@ -181,7 +197,10 @@ function M.start_debug(config_name)
 
   -- Load launch.json configs
   local launch_json = require("nvim-launch.launch_json")
-  local configs = launch_json.load_configs()
+  local configs, lj_err = launch_json.get_configurations()
+  if lj_err then
+    return vim.fn.json_encode({ success = false, error = lj_err })
+  end
 
   if config_name then
     -- Find the named config
@@ -218,6 +237,9 @@ function M.continue()
   if not ok then
     return vim.fn.json_encode({ success = false, error = "nvim-dap not available" })
   end
+  if not dap.session() then
+    return vim.fn.json_encode({ success = false, error = "no active debug session" })
+  end
   dap.continue()
   return vim.fn.json_encode({ success = true })
 end
@@ -228,6 +250,9 @@ function M.stop()
   local ok, dap = pcall(require, "dap")
   if not ok then
     return vim.fn.json_encode({ success = false, error = "nvim-dap not available" })
+  end
+  if not dap.session() then
+    return vim.fn.json_encode({ success = false, error = "no active debug session" })
   end
   dap.terminate()
   return vim.fn.json_encode({ success = true })
@@ -240,6 +265,9 @@ function M.step_over()
   if not ok then
     return vim.fn.json_encode({ success = false, error = "nvim-dap not available" })
   end
+  if not dap.session() then
+    return vim.fn.json_encode({ success = false, error = "no active debug session" })
+  end
   dap.step_over()
   return vim.fn.json_encode({ success = true })
 end
@@ -250,6 +278,9 @@ function M.step_into()
   local ok, dap = pcall(require, "dap")
   if not ok then
     return vim.fn.json_encode({ success = false, error = "nvim-dap not available" })
+  end
+  if not dap.session() then
+    return vim.fn.json_encode({ success = false, error = "no active debug session" })
   end
   dap.step_into()
   return vim.fn.json_encode({ success = true })
@@ -262,20 +293,26 @@ function M.step_out()
   if not ok then
     return vim.fn.json_encode({ success = false, error = "nvim-dap not available" })
   end
+  if not dap.session() then
+    return vim.fn.json_encode({ success = false, error = "no active debug session" })
+  end
   dap.step_out()
   return vim.fn.json_encode({ success = true })
 end
 
 --- List all available launch configurations.
----@return string JSON array of config names
+---@return string JSON {success, configs?: array, error?}
 function M.list_configs()
   local launch_json = require("nvim-launch.launch_json")
-  local configs = launch_json.load_configs()
+  local configs, lj_err = launch_json.get_configurations()
+  if lj_err then
+    return vim.fn.json_encode({ success = false, error = lj_err })
+  end
   local names = {}
   for _, cfg in ipairs(configs) do
     table.insert(names, { name = cfg.name, type = cfg.type, request = cfg.request })
   end
-  return vim.fn.json_encode(names)
+  return vim.fn.json_encode({ success = true, configs = names })
 end
 
 return M
